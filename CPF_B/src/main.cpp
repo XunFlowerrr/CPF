@@ -1,458 +1,413 @@
-/**************************************************************************
- This is an example for our Monochrome OLEDs based on SSD1306 drivers
-
- Pick one up today in the adafruit shop!
- ------> http://www.adafruit.com/category/63_98
-
- This example is for a 128x64 pixel display using I2C to communicate
- 3 pins are required to interface (two I2C and one reset).
-
- Adafruit invests time and resources providing this open
- source code, please support Adafruit and open-source
- hardware by purchasing products from Adafruit!
-
- Written by Limor Fried/Ladyada for Adafruit Industries,
- with contributions from the open source community.
- BSD license, check license.txt for more information
- All text above, and the splash screen below must be
- included in any redistribution.
- **************************************************************************/
-
-#include <SPI.h>
+#include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
+#include <SPI.h>
 #include <Adafruit_SSD1306.h>
+#include <ModbusMaster.h>
+
+// ===========================
+// Pin Definitions
+// ===========================
+
+// LoRa Module Pins
+#define LO_RA_RX_PIN 16  // RN2903 TX → ESP32 RX (UART2 RX)
+#define LO_RA_TX_PIN 17  // RN2903 RX → ESP32 TX (UART2 TX)
+#define LO_RA_RST_PIN 5  // RN2903 RESET
+#define LO_RA_DIO0_PIN 4 // RN2903 DIO0 (Optional)
+#define POWER_PIN 33     // Power supply to RN2903
+
+// OLED Display Pins
+#define OLED_SDA 21              // OLED SDA
+#define OLED_SCL 22              // OLED SCL
+#define SSD1306_I2C_ADDRESS 0x3C // OLED I2C Address
+
+// Modbus Volt Meter Pins
+#define MODBUS_RX_PIN 12 // Voltmeter TX → ESP32 RX (UART1 RX)
+#define MODBUS_TX_PIN 18 // Voltmeter RX → ESP32 TX (UART1 TX)
+
+// ===========================
+// Serial Interfaces
+// ===========================
+
+// UART0: Serial Monitor (Built-in)
+#define SERIAL_BAUD_RATE 115200
+
+// UART1: Modbus Communication
+HardwareSerial ModbusSerial(1);
+
+// UART2: LoRa Communication
+HardwareSerial LoRaSerial(2);
+
+// ===========================
+// OLED Display Initialization
+// ===========================
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-// The pins for I2C are defined by the Wire-library.
-// On an arduino UNO:       A4(SDA), A5(SCL)
-// On an arduino MEGA 2560: 20(SDA), 21(SCL)
-// On an arduino LEONARDO:   2(SDA),  3(SCL), ...
-#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3D ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// Declaration for SSD1306 display connected to I2C (SDA, SCL)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-#define NUMFLAKES 10 // Number of snowflakes in the animation example
+// ===========================
+// ModbusMaster Instance
+// ===========================
 
-#define LOGO_HEIGHT 16
-#define LOGO_WIDTH 16
-static const unsigned char PROGMEM logo_bmp[] =
-    {0b00000000, 0b11000000,
-     0b00000001, 0b11000000,
-     0b00000001, 0b11000000,
-     0b00000011, 0b11100000,
-     0b11110011, 0b11100000,
-     0b11111110, 0b11111000,
-     0b01111110, 0b11111111,
-     0b00110011, 0b10011111,
-     0b00011111, 0b11111100,
-     0b00001101, 0b01110000,
-     0b00011011, 0b10100000,
-     0b00111111, 0b11100000,
-     0b00111111, 0b11110000,
-     0b01111100, 0b11110000,
-     0b01110000, 0b01110000,
-     0b00000000, 0b00110000};
+ModbusMaster node;
 
-void testdrawline()
-{
-  int16_t i;
+// ===========================
+// Register Addresses
+// ===========================
 
-  display.clearDisplay(); // Clear display buffer
+// Voltage Registers
+#define REG_VA 0 // 40001 - 0
+#define REG_VB 1 // 40002 - 1
+#define REG_VC 2 // 40003 - 2
 
-  for (i = 0; i < display.width(); i += 4)
-  {
-    display.drawLine(0, 0, i, display.height() - 1, SSD1306_WHITE);
-    display.display(); // Update screen with each newly-drawn line
-    delay(1);
-  }
-  for (i = 0; i < display.height(); i += 4)
-  {
-    display.drawLine(0, 0, display.width() - 1, i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  delay(250);
+// Current Registers
+#define REG_IA 3 // 40004 - 3 (UINT32)
+#define REG_IB 5 // 40006 - 5 (UINT32)
+#define REG_IC 7 // 40008 - 7 (UINT32)
 
-  display.clearDisplay();
+// Power Registers
+#define REG_TOTAL_APPARENT_POWER 11 // 40012 - 11 (LUINT32)
+#define REG_POWER_FACTOR 10         // 40011 - 10 (INT16)
+#define REG_TOTAL_ACTIVE_POWER 23   // 40024 - 23 (0.01 W)
 
-  for (i = 0; i < display.width(); i += 4)
-  {
-    display.drawLine(0, display.height() - 1, i, 0, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  for (i = display.height() - 1; i >= 0; i -= 4)
-  {
-    display.drawLine(0, display.height() - 1, display.width() - 1, i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  delay(250);
+// ===========================
+// Global Variables
+// ===========================
 
-  display.clearDisplay();
+String latestLoraData = ""; // To store latest LoRa data
 
-  for (i = display.width() - 1; i >= 0; i -= 4)
-  {
-    display.drawLine(display.width() - 1, display.height() - 1, i, 0, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  for (i = display.height() - 1; i >= 0; i -= 4)
-  {
-    display.drawLine(display.width() - 1, display.height() - 1, 0, i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  delay(250);
+// ===========================
+// Function Prototypes
+// ===========================
 
-  display.clearDisplay();
+void resetLoRaModule();
+void initializeOLED();
+void initializeLoRa();
+void initializeModbus();
+void displayData(String loraData, float activePowerKW, float totalActivePower);
 
-  for (i = 0; i < display.height(); i += 4)
-  {
-    display.drawLine(display.width() - 1, 0, 0, i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-  for (i = 0; i < display.width(); i += 4)
-  {
-    display.drawLine(display.width() - 1, 0, i, display.height() - 1, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000); // Pause for 2 seconds
-}
-
-void testdrawrect(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < display.height() / 2; i += 2)
-  {
-    display.drawRect(i, i, display.width() - 2 * i, display.height() - 2 * i, SSD1306_WHITE);
-    display.display(); // Update screen with each newly-drawn rectangle
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testfillrect(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < display.height() / 2; i += 3)
-  {
-    // The INVERSE color is used so rectangles alternate white/black
-    display.fillRect(i, i, display.width() - i * 2, display.height() - i * 2, SSD1306_INVERSE);
-    display.display(); // Update screen with each newly-drawn rectangle
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testdrawcircle(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < max(display.width(), display.height()) / 2; i += 2)
-  {
-    display.drawCircle(display.width() / 2, display.height() / 2, i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testfillcircle(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = max(display.width(), display.height()) / 2; i > 0; i -= 3)
-  {
-    // The INVERSE color is used so circles alternate white/black
-    display.fillCircle(display.width() / 2, display.height() / 2, i, SSD1306_INVERSE);
-    display.display(); // Update screen with each newly-drawn circle
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testdrawroundrect(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < display.height() / 2 - 2; i += 2)
-  {
-    display.drawRoundRect(i, i, display.width() - 2 * i, display.height() - 2 * i,
-                          display.height() / 4, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testfillroundrect(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < display.height() / 2 - 2; i += 2)
-  {
-    // The INVERSE color is used so round-rects alternate white/black
-    display.fillRoundRect(i, i, display.width() - 2 * i, display.height() - 2 * i,
-                          display.height() / 4, SSD1306_INVERSE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testdrawtriangle(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = 0; i < max(display.width(), display.height()) / 2; i += 5)
-  {
-    display.drawTriangle(
-        display.width() / 2, display.height() / 2 - i,
-        display.width() / 2 - i, display.height() / 2 + i,
-        display.width() / 2 + i, display.height() / 2 + i, SSD1306_WHITE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testfilltriangle(void)
-{
-  display.clearDisplay();
-
-  for (int16_t i = max(display.width(), display.height()) / 2; i > 0; i -= 5)
-  {
-    // The INVERSE color is used so triangles alternate white/black
-    display.fillTriangle(
-        display.width() / 2, display.height() / 2 - i,
-        display.width() / 2 - i, display.height() / 2 + i,
-        display.width() / 2 + i, display.height() / 2 + i, SSD1306_INVERSE);
-    display.display();
-    delay(1);
-  }
-
-  delay(2000);
-}
-
-void testdrawchar(void)
-{
-  display.clearDisplay();
-
-  display.setTextSize(1);              // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE); // Draw white text
-  display.setCursor(0, 0);             // Start at top-left corner
-  display.cp437(true);                 // Use full 256 char 'Code Page 437' font
-
-  // Not all the characters will fit on the display. This is normal.
-  // Library will draw what it can and the rest will be clipped.
-  for (int16_t i = 0; i < 256; i++)
-  {
-    if (i == '\n')
-      display.write(' ');
-    else
-      display.write(i);
-  }
-
-  display.display();
-  delay(2000);
-}
-
-void testdrawstyles(void)
-{
-  display.clearDisplay();
-
-  display.setTextSize(1);              // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE); // Draw white text
-  display.setCursor(0, 0);             // Start at top-left corner
-  display.println(F("Hello, world!"));
-
-  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Draw 'inverse' text
-  display.println(3.141592);
-
-  display.setTextSize(2); // Draw 2X-scale text
-  display.setTextColor(SSD1306_WHITE);
-  display.print(F("0x"));
-  display.println(0xDEADBEEF, HEX);
-
-  display.display();
-  delay(2000);
-}
-
-void testscrolltext(void)
-{
-  display.clearDisplay();
-
-  display.setTextSize(2); // Draw 2X-scale text
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(10, 0);
-  display.println(F("scroll"));
-  display.display(); // Show initial text
-  delay(100);
-
-  // Scroll in various directions, pausing in-between:
-  display.startscrollright(0x00, 0x0F);
-  delay(2000);
-  display.stopscroll();
-  delay(1000);
-  display.startscrollleft(0x00, 0x0F);
-  delay(2000);
-  display.stopscroll();
-  delay(1000);
-  display.startscrolldiagright(0x00, 0x07);
-  delay(2000);
-  display.startscrolldiagleft(0x00, 0x07);
-  delay(2000);
-  display.stopscroll();
-  delay(1000);
-}
-
-void testdrawbitmap(void)
-{
-  display.clearDisplay();
-
-  display.drawBitmap(
-      (display.width() - LOGO_WIDTH) / 2,
-      (display.height() - LOGO_HEIGHT) / 2,
-      logo_bmp, LOGO_WIDTH, LOGO_HEIGHT, 1);
-  display.display();
-  delay(1000);
-}
-
-#define XPOS 0 // Indexes into the 'icons' array in function below
-#define YPOS 1
-#define DELTAY 2
-
-void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h)
-{
-  int8_t f, icons[NUMFLAKES][3];
-
-  // Initialize 'snowflake' positions
-  for (f = 0; f < NUMFLAKES; f++)
-  {
-    icons[f][XPOS] = random(1 - LOGO_WIDTH, display.width());
-    icons[f][YPOS] = -LOGO_HEIGHT;
-    icons[f][DELTAY] = random(1, 6);
-    Serial.print(F("x: "));
-    Serial.print(icons[f][XPOS], DEC);
-    Serial.print(F(" y: "));
-    Serial.print(icons[f][YPOS], DEC);
-    Serial.print(F(" dy: "));
-    Serial.println(icons[f][DELTAY], DEC);
-  }
-
-  for (;;)
-  {                         // Loop forever...
-    display.clearDisplay(); // Clear the display buffer
-
-    // Draw each snowflake:
-    for (f = 0; f < NUMFLAKES; f++)
-    {
-      display.drawBitmap(icons[f][XPOS], icons[f][YPOS], bitmap, w, h, SSD1306_WHITE);
-    }
-
-    display.display(); // Show the display buffer on the screen
-    delay(200);        // Pause for 1/10 second
-
-    // Then update coordinates of each flake...
-    for (f = 0; f < NUMFLAKES; f++)
-    {
-      icons[f][YPOS] += icons[f][DELTAY];
-      // If snowflake is off the bottom of the screen...
-      if (icons[f][YPOS] >= display.height())
-      {
-        // Reinitialize to a random position, just off the top
-        icons[f][XPOS] = random(1 - LOGO_WIDTH, display.width());
-        icons[f][YPOS] = -LOGO_HEIGHT;
-        icons[f][DELTAY] = random(1, 6);
-      }
-    }
-  }
-}
+// ===========================
+// Setup Function
+// ===========================
 
 void setup()
 {
-  Serial.begin(9600);
-
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
+  // Initialize Serial Monitor
+  Serial.begin(SERIAL_BAUD_RATE);
+  while (!Serial)
   {
-    Serial.println(F("SSD1306 allocation failed"));
-    for (;;)
-      ; // Don't proceed, loop forever
+    ; // Wait for Serial Monitor to open
   }
+  Serial.println("==================================");
+  Serial.println("ESP32, RN2903 LoRa, and Modbus Setup");
+  Serial.println("==================================");
 
-  // Show initial display buffer contents on the screen --
-  // the library initializes this with an Adafruit splash screen.
-  display.display();
-  delay(2000); // Pause for 2 seconds
+  // Initialize Power Pin for LoRa Module
+  pinMode(POWER_PIN, OUTPUT);
+  digitalWrite(POWER_PIN, HIGH); // Turn on RN2903
+  Serial.println("Power to RN2903 enabled.");
+  delay(100); // Allow power to stabilize
 
-  // Clear the buffer
-  display.clearDisplay();
+  // Initialize Reset Pin for LoRa Module
+  pinMode(LO_RA_RST_PIN, OUTPUT);
+  digitalWrite(LO_RA_RST_PIN, HIGH); // Ensure RESET is inactive
+  Serial.println("RN2903 RESET pin set to HIGH (inactive).");
+  delay(100);
 
-  // Draw a single pixel in white
-  display.drawPixel(10, 10, SSD1306_WHITE);
+  // Reset the LoRa Module
+  resetLoRaModule();
 
-  // Show the display buffer on the screen. You MUST call display() after
-  // drawing commands to make them visible on screen!
-  display.display();
-  delay(2000);
-  // display.display() is NOT necessary after every single drawing command,
-  // unless that's what you want...rather, you can batch up a bunch of
-  // drawing operations and then update the screen all at once by calling
-  // display.display(). These examples demonstrate both approaches...
+  // Initialize OLED Display
+  initializeOLED();
 
-  testdrawline(); // Draw many lines
+  // Initialize LoRa Serial Communication
+  initializeLoRa();
 
-  testdrawrect(); // Draw rectangles (outlines)
+  // Initialize Modbus Communication
+  initializeModbus();
 
-  testfillrect(); // Draw rectangles (filled)
+  // Initialize ModbusMaster
+  node.begin(1, ModbusSerial); // Slave ID 1
 
-  testdrawcircle(); // Draw circles (outlines)
-
-  testfillcircle(); // Draw circles (filled)
-
-  testdrawroundrect(); // Draw rounded rectangles (outlines)
-
-  testfillroundrect(); // Draw rounded rectangles (filled)
-
-  testdrawtriangle(); // Draw triangles (outlines)
-
-  testfilltriangle(); // Draw triangles (filled)
-
-  testdrawchar(); // Draw characters of the default font
-
-  testdrawstyles(); // Draw 'stylized' characters
-
-  testscrolltext(); // Draw scrolling text
-
-  testdrawbitmap(); // Draw a small bitmap image
-
-  // Invert and restore display, pausing in-between
-  display.invertDisplay(true);
-  delay(1000);
-  display.invertDisplay(false);
-  delay(1000);
-
-  testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT); // Animate bitmaps
+  // Send initial command to get system version from LoRa
+  Serial.println("Requesting system version from RN2903...");
+  LoRaSerial.println("sys get ver"); // Lowercase command as per RN2903 specification
 }
+
+// ===========================
+// Loop Function
+// ===========================
 
 void loop()
 {
+  // Handle LoRa Communication
+  if (LoRaSerial.available())
+  {
+    String loraResponse = LoRaSerial.readStringUntil('\n');
+    loraResponse.trim(); // Remove any trailing whitespace or newline characters
+    Serial.print("Received from LoRa: ");
+    Serial.println(loraResponse);
+    latestLoraData = loraResponse; // Update latest LoRa data
+  }
+  else
+  {
+    Serial.println("No data from LoRa.");
+  }
+
+  // Handle Modbus Communication
+  uint8_t result;
+
+  // Reading Voltages Va, Vb, Vc (Registers 40001, 40002, 40003)
+  uint16_t va_raw, vb_raw, vc_raw;
+  result = node.readHoldingRegisters(REG_VA, 3); // Read 3 registers starting at REG_VA
+  if (result == node.ku8MBSuccess)
+  {
+    va_raw = node.getResponseBuffer(0);
+    vb_raw = node.getResponseBuffer(1);
+    vc_raw = node.getResponseBuffer(2);
+
+    float va = va_raw * 0.01;
+    float vb = vb_raw * 0.01;
+    float vc = vc_raw * 0.01;
+
+    Serial.print("Va: ");
+    Serial.print(va);
+    Serial.println(" V");
+    Serial.print("Vb: ");
+    Serial.print(vb);
+    Serial.println(" V");
+    Serial.print("Vc: ");
+    Serial.print(vc);
+    Serial.println(" V");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Voltages): ");
+    Serial.println(result, HEX);
+  }
+
+  // Reading Currents Ia, Ib, Ic (Registers 40004, 40006, 40008)
+  uint32_t ia_raw, ib_raw, ic_raw;
+
+  // Read Ia (40004)
+  result = node.readHoldingRegisters(REG_IA, 2); // UINT32 occupies 2 registers
+  float ia = 0.0;
+  if (result == node.ku8MBSuccess)
+  {
+    ia_raw = ((uint32_t)node.getResponseBuffer(1) << 16) | node.getResponseBuffer(0); // Swap for little endian
+    ia = ia_raw * 0.001;                                                              // Scale factor
+    Serial.print("Ia: ");
+    Serial.print(ia);
+    Serial.println(" A");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Ia): ");
+    Serial.println(result, HEX);
+  }
+
+  // Read Ib (40006)
+  result = node.readHoldingRegisters(REG_IB, 2); // UINT32 occupies 2 registers
+  float ib = 0.0;
+  if (result == node.ku8MBSuccess)
+  {
+    ib_raw = ((uint32_t)node.getResponseBuffer(1) << 16) | node.getResponseBuffer(0); // Swap for little endian
+    ib = ib_raw * 0.001;                                                              // Scale factor
+    Serial.print("Ib: ");
+    Serial.print(ib);
+    Serial.println(" A");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Ib): ");
+    Serial.println(result, HEX);
+  }
+
+  // Read Ic (40008)
+  result = node.readHoldingRegisters(REG_IC, 2); // UINT32 occupies 2 registers
+  float ic = 0.0;
+  if (result == node.ku8MBSuccess)
+  {
+    ic_raw = ((uint32_t)node.getResponseBuffer(1) << 16) | node.getResponseBuffer(0); // Swap for little endian
+    ic = ic_raw * 0.001;                                                              // Scale factor
+    Serial.print("Ic: ");
+    Serial.print(ic);
+    Serial.println(" A");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Ic): ");
+    Serial.println(result, HEX);
+  }
+
+  // Reading Total Apparent Power (VA) (Register 40012)
+  uint32_t total_va_raw = 0;
+  float total_va = 0.0;
+  result = node.readHoldingRegisters(REG_TOTAL_APPARENT_POWER, 2); // LUINT32 occupies 2 registers
+  if (result == node.ku8MBSuccess)
+  {
+    total_va_raw = ((uint32_t)node.getResponseBuffer(1) << 16) | node.getResponseBuffer(0); // Swap for little endian
+    total_va = total_va_raw * 0.01;                                                         // Scale factor
+    Serial.print("Total Apparent Power: ");
+    Serial.print(total_va);
+    Serial.println(" VA");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Total VA): ");
+    Serial.println(result, HEX);
+  }
+
+  // Reading Power Factor (40011)
+  int16_t power_factor_raw = 0;
+  float power_factor = 0.0;
+  result = node.readHoldingRegisters(REG_POWER_FACTOR, 1); // 40011 - 10 (INT16)
+  if (result == node.ku8MBSuccess)
+  {
+    power_factor_raw = node.getResponseBuffer(0);
+    power_factor = power_factor_raw * 0.001; // Scale factor
+    Serial.print("Power Factor: ");
+    Serial.println(power_factor);
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Power Factor): ");
+    Serial.println(result, HEX);
+  }
+
+  // Calculate Active Power (kW) = Total Apparent Power (VA) * Power Factor / 1000
+  float active_power_kw = 0.0;
+  if (result == node.ku8MBSuccess) // Ensure Power Factor was read successfully
+  {
+    active_power_kw = (total_va * power_factor) / 1000.0;
+    Serial.print("Active Power: ");
+    Serial.print(active_power_kw);
+    Serial.println(" kW");
+  }
+
+  // Reading Total Active Power (40024-40025)
+  uint32_t total_active_power_raw = 0;
+  float total_active_power = 0.0;
+  result = node.readHoldingRegisters(REG_TOTAL_ACTIVE_POWER, 2); // Read 2 registers
+  if (result == node.ku8MBSuccess)
+  {
+    total_active_power_raw = ((uint32_t)node.getResponseBuffer(1) << 16) | node.getResponseBuffer(0); // Swap for little endian
+    total_active_power = total_active_power_raw * 0.01;                                               // Scale factor
+    Serial.print("Total Active Power: ");
+    Serial.print(total_active_power);
+    Serial.println(" W");
+  }
+  else
+  {
+    Serial.print("Modbus Read Error (Total Active Power): ");
+    Serial.println(result, HEX);
+  }
+
+  // Optionally, send this data via LoRa
+  String dataToSend = "Va: " + String(va_raw * 0.01) + " V, " +
+                      "Vb: " + String(vb_raw * 0.01) + " V, " +
+                      "Vc: " + String(vc_raw * 0.01) + " V, " +
+                      "Ia: " + String(ia) + " A, " +
+                      "Ib: " + String(ib) + " A, " +
+                      "Ic: " + String(ic) + " A, " +
+                      "Active Power: " + String(active_power_kw) + " kW, " +
+                      "Total Active Power: " + String(total_active_power) + " W";
+  // LoRaSerial.println(dataToSend);
+
+  // Display data on OLED
+  displayData(dataToSend, active_power_kw, total_active_power);
+
+  delay(2000); // Wait for 2 seconds before next loop
+}
+
+// ===========================
+// Function Implementations
+// ===========================
+
+// Function to Reset the LoRa Module
+void resetLoRaModule()
+{
+  Serial.println("Resetting RN2903 module...");
+  digitalWrite(LO_RA_RST_PIN, LOW);  // Activate RESET
+  delay(1000);                       // Hold RESET low for 1 second
+  digitalWrite(LO_RA_RST_PIN, HIGH); // Deactivate RESET
+  Serial.println("RN2903 module reset.");
+  delay(2000); // Wait for module to initialize after reset
+}
+
+// Function to Initialize the OLED Display
+void initializeOLED()
+{
+  Serial.println("Initializing OLED display...");
+  Wire.begin(OLED_SDA, OLED_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS))
+  {
+    Serial.println("OLED initialization failed!");
+    while (1)
+      ; // Halt execution if OLED fails to initialize
+  }
+  Serial.println("OLED initialized successfully.");
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("ESP32, LoRa, Modbus");
+  display.println("Setup Completed");
+  display.display();
+  delay(2000); // Display welcome message for 2 seconds
+}
+
+// Function to Initialize LoRa Serial Communication
+void initializeLoRa()
+{
+  Serial.println("Initializing LoRa Serial Communication...");
+  LoRaSerial.begin(57600, SERIAL_8N1, LO_RA_RX_PIN, LO_RA_TX_PIN); // Initialize at 57600 bps
+  delay(100);                                                      // Short delay to ensure serial starts
+  Serial.println("LoRa Serial Communication initialized at 57600 bps.");
+
+  // Optionally, verify if the module is responding
+  Serial.println("Sending 'sys get ver' command to LoRa...");
+  LoRaSerial.println("sys get ver"); // Lowercase command
+  delay(1000);                       // Wait for response
+}
+
+// Function to Initialize Modbus Communication
+void initializeModbus()
+{
+  Serial.println("Initializing Modbus Communication...");
+  // Initialize ModbusSerial with the designated RX and TX pins
+  ModbusSerial.begin(9600, SERIAL_8N1, MODBUS_RX_PIN, MODBUS_TX_PIN); // Adjust baud rate as per volt meter
+  delay(100);                                                         // Short delay to ensure serial starts
+  Serial.println("Modbus Serial Communication initialized at 9600 bps.");
+}
+
+// Function to Display Data on OLED
+void displayData(String loraData, float activePowerKW, float totalActivePower)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+
+  // Display LoRa Data
+  if (loraData.length() > 0)
+  {
+    display.println("LoRa Data:");
+    display.println(loraData);
+    display.println();
+  }
+
+  // Display Active Power
+  display.println("Active Power:");
+  display.print(activePowerKW);
+  display.println(" kW");
+
+  // Display Total Active Power
+  display.println("Total Active Power:");
+  display.print(totalActivePower);
+  display.println(" W");
+
+  display.display();
 }
