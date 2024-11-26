@@ -118,6 +118,7 @@ namespace LoRaCommands
   const char *RADIO_FREQ = "radio set freq 910000000"; /**< Set radio frequency to 910 MHz */
   const char *RADIO_SF = "radio set sf sf7";           /**< Set spreading factor to SF7 */
   const char *SYS_GET_VER = "sys get ver";             /**< Get system version */
+  const char *SYS_RESET = "sys reset";                 /**< Reset system */
   const char *RADIO_TX_PREFIX = "radio tx ";           /**< Prefix for transmitting data */
 }
 
@@ -387,7 +388,12 @@ void setup()
 
   // Initialize Reset Pin for LoRa Module
   pinMode(Pins::LORA_RST, OUTPUT);
+  digitalWrite(Pins::LORA_RST, HIGH);
+  delay(Delays::LONG);
+  digitalWrite(Pins::LORA_RST, LOW); //
+  delay(Delays::LONG);
   digitalWrite(Pins::LORA_RST, HIGH); // Ensure RESET is inactive
+  loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG);
   Serial.println("RN2903 RESET pin set to HIGH (inactive).");
   delay(Delays::SHORT);
 
