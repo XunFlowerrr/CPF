@@ -1,3 +1,12 @@
+/**
+ * @file main.cpp
+ * @brief ESP32-based system integrating LoRa (RN2903), OLED display, and Modbus voltage meter.
+ *
+ * This project sets up an ESP32 microcontroller to communicate with an RN2903 LoRa module,
+ * an OLED display, and a Modbus-compatible voltage meter. It reads sensor data via Modbus,
+ * displays it on the OLED, and transmits the data over LoRa in hexadecimal-encoded JSON format.
+ */
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -9,120 +18,153 @@
 // Configuration Section
 // ===========================
 
-// ----- Pin Definitions -----
+/**
+ * @namespace Pins
+ * @brief Defines the pin configurations for various modules.
+ */
 namespace Pins
 {
   // LoRa Module Pins
-  constexpr uint8_t LORA_RX = 16;  // RN2903 TX → ESP32 RX (UART2 RX)
-  constexpr uint8_t LORA_TX = 17;  // RN2903 RX → ESP32 TX (UART2 TX)
-  constexpr uint8_t LORA_RST = 5;  // RN2903 RESET
-  constexpr uint8_t LORA_DIO0 = 4; // RN2903 DIO0 (Optional)
-  constexpr uint8_t POWER = 33;    // Power supply to RN2903
+  constexpr uint8_t LORA_RX = 16;  /**< RN2903 TX → ESP32 RX (UART2 RX) */
+  constexpr uint8_t LORA_TX = 17;  /**< RN2903 RX → ESP32 TX (UART2 TX) */
+  constexpr uint8_t LORA_RST = 5;  /**< RN2903 RESET */
+  constexpr uint8_t LORA_DIO0 = 4; /**< RN2903 DIO0 (Optional) */
+  constexpr uint8_t POWER = 33;    /**< Power supply to RN2903 */
 
   // OLED Display Pins
-  constexpr uint8_t OLED_SDA = 21; // OLED SDA
-  constexpr uint8_t OLED_SCL = 22; // OLED SCL
+  constexpr uint8_t OLED_SDA = 21; /**< OLED SDA */
+  constexpr uint8_t OLED_SCL = 22; /**< OLED SCL */
 
   // Modbus Volt Meter Pins
-  constexpr uint8_t MODBUS_RX = 12; // Voltmeter TX → ESP32 RX (UART1 RX)
-  constexpr uint8_t MODBUS_TX = 18; // Voltmeter RX → ESP32 TX (UART1 TX)
+  constexpr uint8_t MODBUS_RX = 12; /**< Voltmeter TX → ESP32 RX (UART1 RX) */
+  constexpr uint8_t MODBUS_TX = 18; /**< Voltmeter RX → ESP32 TX (UART1 TX) */
 }
 
-// ----- Serial Interfaces -----
+/**
+ * @namespace UserSerialConfig
+ * @brief Configures serial communication parameters.
+ */
 namespace UserSerialConfig
 {
-  constexpr unsigned long BAUD_RATE = 115200;
+  constexpr unsigned long BAUD_RATE = 115200; /**< Serial Monitor baud rate */
 
   // UART Ports
-  constexpr int MODBUS_PORT = 1;
-  constexpr int LORA_PORT = 2;
+  constexpr int MODBUS_PORT = 1; /**< UART1 for Modbus */
+  constexpr int LORA_PORT = 2;   /**< UART2 for LoRa */
 }
 
-// ----- OLED Display Settings -----
+/**
+ * @namespace OLEDConfig
+ * @brief Configuration settings for the OLED display.
+ */
 namespace OLEDConfig
 {
-  constexpr int WIDTH = 128;                     // OLED display width, in pixels
-  constexpr int HEIGHT = 64;                     // OLED display height, in pixels
-  constexpr int TEXT_SIZE = 1;                   // Text size for OLED
-  constexpr uint16_t TEXT_COLOR = SSD1306_WHITE; // Text color for OLED
-  constexpr unsigned long WELCOME_DELAY = 2000;  // Delay to display welcome message (ms)
+  constexpr int WIDTH = 128;                     /**< OLED display width in pixels */
+  constexpr int HEIGHT = 64;                     /**< OLED display height in pixels */
+  constexpr int TEXT_SIZE = 1;                   /**< Text size for OLED */
+  constexpr uint16_t TEXT_COLOR = SSD1306_WHITE; /**< Text color for OLED */
+  constexpr unsigned long WELCOME_DELAY = 2000;  /**< Delay to display welcome message (ms) */
 }
 
-// ----- Modbus Register Addresses -----
+/**
+ * @namespace ModbusRegisters
+ * @brief Defines Modbus register addresses for voltage, current, and power measurements.
+ */
 namespace ModbusRegisters
 {
   // Voltage Registers
-  constexpr uint16_t VA = 0; // 40001 - 0
-  constexpr uint16_t VB = 1; // 40002 - 1
-  constexpr uint16_t VC = 2; // 40003 - 2
+  constexpr uint16_t VA = 0; /**< 40001 - VA */
+  constexpr uint16_t VB = 1; /**< 40002 - VB */
+  constexpr uint16_t VC = 2; /**< 40003 - VC */
 
   // Current Registers
-  constexpr uint16_t IA = 3; // 40004 - 3 (UINT32)
-  constexpr uint16_t IB = 5; // 40006 - 5 (UINT32)
-  constexpr uint16_t IC = 7; // 40008 - 7 (UINT32)
+  constexpr uint16_t IA = 3; /**< 40004 - IA (UINT32) */
+  constexpr uint16_t IB = 5; /**< 40006 - IB (UINT32) */
+  constexpr uint16_t IC = 7; /**< 40008 - IC (UINT32) */
 
   // Power Registers
-  constexpr uint16_t TOTAL_APPARENT_POWER = 11; // 40012 - 11 (LUINT32)
-  constexpr uint16_t POWER_FACTOR = 10;         // 40011 - 10 (INT16)
-  constexpr uint16_t TOTAL_ACTIVE_POWER = 23;   // 40024 - 23 (0.01 W)
+  constexpr uint16_t TOTAL_APPARENT_POWER = 11; /**< 40012 - Total Apparent Power (LUINT32) */
+  constexpr uint16_t POWER_FACTOR = 10;         /**< 40011 - Power Factor (INT16) */
+  constexpr uint16_t TOTAL_ACTIVE_POWER = 23;   /**< 40024 - Total Active Power (0.01 W) */
 }
 
-// ----- Configuration Toggles -----
-constexpr bool USE_MOCK_DATA = true; // Set to true to use mock data instead of actual data
+/**
+ * @brief Configuration toggle to use mock data instead of actual Modbus data.
+ */
+constexpr bool USE_MOCK_DATA = true; /**< Set to true to use mock data */
 
-// ----- Delay Durations (ms) -----
+/**
+ * @namespace Delays
+ * @brief Defines various delay durations in milliseconds.
+ */
 namespace Delays
 {
-  constexpr unsigned long SHORT = 100;
-  constexpr unsigned long MEDIUM = 500;
-  constexpr unsigned long LONG = 1000;
-  constexpr unsigned long EXTRA_LONG = 2000;
+  constexpr unsigned long SHORT = 100;       /**< Short delay */
+  constexpr unsigned long MEDIUM = 500;      /**< Medium delay */
+  constexpr unsigned long LONG = 1000;       /**< Long delay */
+  constexpr unsigned long EXTRA_LONG = 2000; /**< Extra long delay */
 }
 
-// ----- LoRa Commands -----
+/**
+ * @namespace LoRaCommands
+ * @brief Defines command strings for configuring the LoRa module.
+ */
 namespace LoRaCommands
 {
-  const char *MAC_PAUSE = "mac pause";
-  const char *RADIO_BW = "radio set bw 125";
-  const char *RADIO_CR = "radio set cr 4/5";
-  const char *RADIO_PWR = "radio set pwr 20";
-  const char *RADIO_FREQ = "radio set freq 910000000";
-  const char *RADIO_SF = "radio set sf sf7";
-  const char *SYS_GET_VER = "sys get ver";
-  const char *RADIO_TX_PREFIX = "radio tx ";
+  const char *MAC_PAUSE = "mac pause";                 /**< Pause MAC operations */
+  const char *RADIO_BW = "radio set bw 125";           /**< Set radio bandwidth to 125 kHz */
+  const char *RADIO_CR = "radio set cr 4/5";           /**< Set radio coding rate to 4/5 */
+  const char *RADIO_PWR = "radio set pwr 20";          /**< Set radio power to 20 dBm */
+  const char *RADIO_FREQ = "radio set freq 910000000"; /**< Set radio frequency to 910 MHz */
+  const char *RADIO_SF = "radio set sf sf7";           /**< Set spreading factor to SF7 */
+  const char *SYS_GET_VER = "sys get ver";             /**< Get system version */
+  const char *RADIO_TX_PREFIX = "radio tx ";           /**< Prefix for transmitting data */
 }
 
-// ----- JSON Configuration -----
+/**
+ * @namespace JSONKeys
+ * @brief Defines JSON keys used in data transmission.
+ */
 namespace JSONKeys
 {
-  const char *VA = "Va";
-  const char *VB = "Vb";
-  const char *VC = "Vc";
-  const char *IA = "Ia";
-  const char *IB = "Ib";
-  const char *IC = "Ic";
-  const char *ACTIVE_POWER = "ActivePower";
-  const char *TOTAL_ACTIVE_POWER = "TotalActivePower";
+  const char *VA = "Va";                               /**< Voltage A */
+  const char *VB = "Vb";                               /**< Voltage B */
+  const char *VC = "Vc";                               /**< Voltage C */
+  const char *IA = "Ia";                               /**< Current A */
+  const char *IB = "Ib";                               /**< Current B */
+  const char *IC = "Ic";                               /**< Current C */
+  const char *ACTIVE_POWER = "ActivePower";            /**< Active Power */
+  const char *TOTAL_ACTIVE_POWER = "TotalActivePower"; /**< Total Active Power */
 }
 
 // ===========================
 // Global Objects and Variables
 // ===========================
 
-// OLED Display Instance
+/**
+ * @brief OLED Display Instance using Adafruit_SSD1306 library.
+ */
 Adafruit_SSD1306 display(OLEDConfig::WIDTH, OLEDConfig::HEIGHT, &Wire, -1);
 
-// ModbusMaster Instance
+/**
+ * @brief ModbusMaster Instance for Modbus communication.
+ */
 ModbusMaster modbus;
 
-// HardwareSerial Instances
-HardwareSerial modbusSerial(UserSerialConfig::MODBUS_PORT);
-HardwareSerial loraSerial(UserSerialConfig::LORA_PORT);
+/**
+ * @brief HardwareSerial instances for Modbus and LoRa communication.
+ */
+HardwareSerial modbusSerial(UserSerialConfig::MODBUS_PORT); /**< Serial for Modbus */
+HardwareSerial loraSerial(UserSerialConfig::LORA_PORT);     /**< Serial for LoRa */
 
-// Global Variables
-String latestLoraData = ""; // To store latest LoRa data
+/**
+ * @brief Stores the latest data received from LoRa.
+ */
+String latestLoraData = "";
 
-// Timing Variables
+/**
+ * @brief Timing variables for loop interval management.
+ */
 unsigned long previousMillis = 0;
 constexpr unsigned long LOOP_INTERVAL = Delays::EXTRA_LONG;
 
@@ -131,10 +173,10 @@ constexpr unsigned long LOOP_INTERVAL = Delays::EXTRA_LONG;
 // ===========================
 
 /**
- * @brief Convert a string to its hexadecimal representation.
+ * @brief Converts a string to its hexadecimal representation.
  *
- * @param input The input string.
- * @return String The hexadecimal representation.
+ * @param input The input string to convert.
+ * @return String The hexadecimal representation of the input string.
  */
 String stringToHex(const String &input)
 {
@@ -149,10 +191,10 @@ String stringToHex(const String &input)
 }
 
 /**
- * @brief Convert a hexadecimal string back to a regular string.
+ * @brief Converts a hexadecimal string back to a regular string.
  *
- * @param hex The hexadecimal string.
- * @return String The converted string.
+ * @param hex The hexadecimal string to convert.
+ * @return String The converted regular string.
  */
 String hexToString(const String &hex)
 {
@@ -171,11 +213,15 @@ String hexToString(const String &hex)
 // ===========================
 
 /**
- * @brief Manages LoRa module operations.
+ * @class LoRaManager
+ * @brief Manages LoRa module operations including initialization, sending, and receiving data.
  */
 class LoRaManager
 {
 public:
+  /**
+   * @brief Initializes LoRa serial communication and configures the LoRa module.
+   */
   void begin()
   {
     Serial.println("Initializing LoRa Serial Communication...");
@@ -187,6 +233,9 @@ public:
     initializeModule();
   }
 
+  /**
+   * @brief Sends a series of commands to configure the LoRa module.
+   */
   void initializeModule()
   {
     Serial.println("Initializing LoRa Module with custom settings...");
@@ -199,6 +248,12 @@ public:
     sendCommand(LoRaCommands::RADIO_SF, Delays::MEDIUM);
   }
 
+  /**
+   * @brief Sends a command string to the LoRa module.
+   *
+   * @param cmd The command string to send.
+   * @param delayTime The delay after sending the command.
+   */
   void sendCommand(const char *cmd, unsigned long delayTime)
   {
     loraSerial.println(cmd);
@@ -207,6 +262,11 @@ public:
     delay(delayTime);
   }
 
+  /**
+   * @brief Sends hexadecimal-encoded data via LoRa.
+   *
+   * @param dataHex The data string in hexadecimal format.
+   */
   void sendData(const String &dataHex)
   {
     String command = String(LoRaCommands::RADIO_TX_PREFIX) + dataHex;
@@ -214,6 +274,13 @@ public:
     Serial.println("Sending via LoRa: " + command);
   }
 
+  /**
+   * @brief Receives data from the LoRa module if available.
+   *
+   * @param data Reference to a string where received data will be stored.
+   * @return true If data was received successfully.
+   * @return false If no data was received.
+   */
   bool receiveData(String &data)
   {
     if (loraSerial.available())
@@ -229,11 +296,15 @@ public:
 };
 
 /**
- * @brief Manages Modbus communication and data retrieval.
+ * @class ModbusManager
+ * @brief Manages Modbus communication and data retrieval from the voltage meter.
  */
 class ModbusManager
 {
 public:
+  /**
+   * @brief Initializes Modbus serial communication.
+   */
   void begin()
   {
     Serial.println("Initializing Modbus Communication...");
@@ -244,6 +315,15 @@ public:
     modbus.begin(1, modbusSerial); // Slave ID 1
   }
 
+  /**
+   * @brief Reads a set of holding registers from the Modbus device.
+   *
+   * @param start The starting register address.
+   * @param count The number of registers to read.
+   * @param buffer Pointer to an array where the read data will be stored.
+   * @return true If the registers were read successfully.
+   * @return false If there was an error reading the registers.
+   */
   bool readRegisters(uint16_t start, uint16_t count, uint16_t *buffer)
   {
     uint8_t result = modbus.readHoldingRegisters(start, count);
@@ -274,11 +354,19 @@ void initializeOLED();
 void displayData(const String &jsonData, float activePowerKW, float totalActivePower);
 
 // ===========================
+// Global Instances
+// ===========================
+LoRaManager loraManager;     /**< Instance of LoRaManager */
+ModbusManager modbusManager; /**< Instance of ModbusManager */
+
+// ===========================
 // Setup Function
 // ===========================
-LoRaManager loraManager;
-ModbusManager modbusManager;
 
+/**
+ * @brief Arduino setup function. Initializes serial communication, power and reset pins for LoRa,
+ *        OLED display, LoRa and Modbus communication, and sends initial commands.
+ */
 void setup()
 {
   // Initialize Serial Monitor
@@ -326,6 +414,29 @@ void setup()
 // ===========================
 // Loop Function
 // ===========================
+
+/**
+ * @brief Arduino loop function. Periodically reads data from Modbus, constructs JSON,
+ *        sends it via LoRa, and displays relevant information on the OLED.
+ */
+/**
+ * @brief Main loop function that handles periodic tasks.
+ *
+ * This function is called repeatedly and performs the following tasks:
+ * - Receives data from LoRa and processes it.
+ * - If USE_MOCK_DATA is false, reads various electrical parameters from Modbus registers:
+ *   - Voltages (VA, VB, VC)
+ *   - Currents (IA, IB, IC)
+ *   - Total Apparent Power
+ *   - Power Factor
+ *   - Active Power (kW)
+ *   - Total Active Power
+ * - Constructs a JSON object with the read data and sends it via LoRa.
+ * - Displays the data on an OLED screen.
+ * - If USE_MOCK_DATA is true, uses predefined mock data instead of reading from Modbus.
+ *
+ * The function ensures that the tasks are performed at intervals defined by LOOP_INTERVAL.
+ */
 void loop()
 {
   unsigned long currentMillis = millis();
@@ -333,6 +444,7 @@ void loop()
   {
     previousMillis = currentMillis;
 
+    // Attempt to receive data from LoRa
     if (loraManager.receiveData(latestLoraData))
     {
       // Process LoRa data if needed
@@ -471,8 +583,8 @@ void loop()
       Serial.println("Sending Mock Data via LoRa: " + String(LoRaCommands::RADIO_TX_PREFIX) + mockHexData);
 
       // Display Mock data on OLED
-      float mockActivePowerKW = 12.345f;      // Example mock value
-      float mockTotalActivePower = 12345.67f; // Example mock value
+      float mockActivePowerKW = 12.345f;      /**< Example mock active power in kW */
+      float mockTotalActivePower = 12345.67f; /**< Example mock total active power in W */
       displayData(mockJsonData, mockActivePowerKW, mockTotalActivePower);
     }
   }
@@ -485,7 +597,7 @@ void loop()
 // ===========================
 
 /**
- * @brief Resets the LoRa module.
+ * @brief Resets the RN2903 LoRa module by toggling the RESET pin.
  */
 void resetLoRaModule()
 {
@@ -500,7 +612,7 @@ void resetLoRaModule()
 }
 
 /**
- * @brief Initializes the OLED display.
+ * @brief Initializes the OLED display, displays a welcome message, and clears the screen.
  */
 void initializeOLED()
 {
@@ -525,11 +637,11 @@ void initializeOLED()
 }
 
 /**
- * @brief Displays data on the OLED.
+ * @brief Displays the total active power on the OLED screen.
  *
- * @param jsonData The JSON data string.
- * @param activePowerKW Active power in kW.
- * @param totalActivePower Total active power in W.
+ * @param jsonData The JSON data string (unused in display but can be extended).
+ * @param activePowerKW Active power in kilowatts.
+ * @param totalActivePower Total active power in watts.
  */
 void displayData(const String &jsonData, float activePowerKW, float totalActivePower)
 {
