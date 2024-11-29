@@ -1,6 +1,7 @@
+import requests
+import json
 import serial
 import time
-import json
 import logging
 from typing import Optional
 
@@ -9,7 +10,7 @@ from typing import Optional
 # ===========================
 
 class Config:
-    """Configuration parameters for the LoRa communication."""
+    """Configuration parameters for the LoRa communication and API integration."""
 
     # ----- Serial Connection Parameters -----
     SERIAL_PORT = '/dev/serial0'    # Replace with your serial port (e.g., 'COM3' on Windows)
@@ -44,8 +45,13 @@ class Config:
         "TotalActivePower": "TotalActivePower"
     }
 
+    # ----- API Integration -----
+    POST_URL = 'https://fac7-171-96-191-39.ngrok-free.app/Dashboard/api/update_data.php'  # Replace with your actual URL
+    SENSOR_ID = 123
+    GATEWAY_ID = "GATEWAY001"
+
     # ----- Logging and Debugging -----
-    DEBUG_MODE = False              # Set to True to enable debug logs
+    DEBUG_MODE = True              # Set to True to enable debug logs
     LOG_LEVEL = logging.DEBUG if DEBUG_MODE else logging.INFO
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
@@ -95,7 +101,8 @@ def hex_to_string(hex_str: str) -> str:
 
 class LoRaManager:
     """
-    Manages LoRa module operations including configuration, sending commands, and processing incoming messages.
+    Manages LoRa module operations including configuration, sending commands, processing incoming messages,
+    and sending data to a remote API via POST requests.
     """
 
     def __init__(self, config: Config):
@@ -242,9 +249,30 @@ class LoRaManager:
         else:
             logger.warning("No response received for system version.")
 
+    def send_post_request(self, data: dict):
+        """
+        Send a POST request with the given data to the configured API endpoint.
+
+        Args:
+            data (dict): The data to send in the POST request.
+        """
+        headers = {'Content-Type': 'application/json'}
+        try:
+            response = requests.post(self.config.POST_URL, data=json.dumps(data), headers=headers)
+            if response.status_code == 200:
+                try:
+                    response_data = response.json()
+                    logger.info(f"POST request successful. Response: {response_data}")
+                except json.JSONDecodeError:
+                    logger.warning("POST request successful but failed to decode JSON response.")
+            else:
+                logger.error(f"Failed to send POST request. Status code: {response.status_code}, Response: {response.text}")
+        except requests.RequestException as e:
+            logger.error(f"Exception occurred during POST request: {e}")
+
     def process_received_message(self, message: str):
         """
-        Process and convert received hex messages to readable JSON data.
+        Process and convert received hex messages to readable JSON data, then send it via POST.
 
         Args:
             message (str): The raw message received from LoRa.
@@ -263,11 +291,21 @@ class LoRaManager:
                     logger.info("Parsed JSON Data:")
                     for key, value in data.items():
                         logger.info(f"  {key}: {value}")
-                    # Example of handling data
-                    total_active_power = data.get(self.config.JSON_KEYS["TotalActivePower"])
-                    logger.info(f"Total Active Power: {total_active_power}")
+
+                    # Prepare data for POST request
+                    post_data = {
+                        "sensor_id": self.config.SENSOR_ID,
+                        "gateway_id": self.config.GATEWAY_ID,
+                        "data_kwh" : data.get("TotalActivePower", 0.0)
+                    }
+
+                    # Send POST request with the data
+                    self.send_post_request(post_data)
+
                 except json.JSONDecodeError:
                     logger.error(f"Failed to decode JSON from message: {readable_message}")
+                except Exception:
+                    pass
             else:
                 logger.error(f"Unexpected radio_rx format: {message}")
 
@@ -321,13 +359,12 @@ def main():
     lora_manager = LoRaManager(config)
 
     try:
-        with serial.Serial() as ser:
-            lora_manager.open_connection()
-            lora_manager.configure_gateway()
-            lora_manager.get_system_version()
+        lora_manager.open_connection()
+        lora_manager.configure_gateway()
+        lora_manager.get_system_version()
 
-            # Start listening for incoming messages
-            lora_manager.listen_for_messages()
+        # Start listening for incoming messages
+        lora_manager.listen_for_messages()
 
     except serial.SerialException as e:
         logger.error(f"Serial Exception: {e}")
