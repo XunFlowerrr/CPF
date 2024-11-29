@@ -210,6 +210,13 @@ String hexToString(const String &hex)
 }
 
 // ===========================
+// Function Prototypes
+// ===========================
+void resetLoRaModule(); // Added declaration before class definitions
+void initializeOLED();
+void displayData(const String &jsonData, float activePowerKW, float totalActivePower);
+
+// ===========================
 // Class Definitions
 // ===========================
 
@@ -232,6 +239,41 @@ public:
 
     // Send initialization commands
     initializeModule();
+
+    // Ensure LoRa module responds to 'sys get ver'
+    bool versionReceived = false;
+    while (!versionReceived)
+    {
+      Serial.println("Sending 'sys get ver' to LoRa module...");
+      sendCommand(LoRaCommands::SYS_GET_VER, Delays::LONG);
+
+      // Wait for response within timeout
+      unsigned long startTime = millis();
+      unsigned long timeout = 5000; // 5 seconds timeout
+      while (millis() - startTime < timeout)
+      {
+        if (receiveData(latestLoraData))
+        {
+          // Check if the response contains version information
+          if (latestLoraData.startsWith("RN2903") || latestLoraData.startsWith("RN2"))
+          {
+            Serial.println("LoRa module version received: " + latestLoraData);
+            versionReceived = true;
+            break;
+          }
+        }
+        delay(100); // Small delay to avoid tight loop
+      }
+
+      if (!versionReceived)
+      {
+        Serial.println("No response to 'sys get ver'. Resetting LoRa module...");
+        resetLoRaModule();
+        initializeModule(); // Reinitialize module after reset
+      }
+    }
+
+    Serial.println("LoRa module is ready and responding.");
   }
 
   /**
@@ -548,7 +590,7 @@ void loop()
       jsonData += "\"" + String(JSONKeys::IB) + "\":" + String(currents[1], 3) + ",";
       jsonData += "\"" + String(JSONKeys::IC) + "\":" + String(currents[2], 3) + ",";
       jsonData += "\"" + String(JSONKeys::ACTIVE_POWER) + "\":" + String(activePowerKW, 3) + ",";
-      jsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":" + String(totalActivePower, 2);
+      jsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":" + String(totalActivePower * 0.001f, 2);
       jsonData += "}";
 
       Serial.println("JSON Data to send via LoRa: " + jsonData);
@@ -575,7 +617,7 @@ void loop()
       mockJsonData += "\"" + String(JSONKeys::IB) + "\":5.456,";
       mockJsonData += "\"" + String(JSONKeys::IC) + "\":5.789,";
       mockJsonData += "\"" + String(JSONKeys::ACTIVE_POWER) + "\":12.345,";
-      mockJsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":12345.67";
+      mockJsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":12.345";
       mockJsonData += "}";
 
       Serial.println("Using Mock Data: " + mockJsonData);
@@ -589,8 +631,8 @@ void loop()
       Serial.println("Sending Mock Data via LoRa: " + String(LoRaCommands::RADIO_TX_PREFIX) + mockHexData);
 
       // Display Mock data on OLED
-      float mockActivePowerKW = 12.345f;      /**< Example mock active power in kW */
-      float mockTotalActivePower = 12345.67f; /**< Example mock total active power in W */
+      float mockActivePowerKW = 12.345f;    /**< Example mock active power in kW */
+      float mockTotalActivePower = 12.345f; /**< Example mock total active power in W */
       displayData(mockJsonData, mockActivePowerKW, mockTotalActivePower);
     }
   }
@@ -608,11 +650,12 @@ void loop()
 void resetLoRaModule()
 {
   Serial.println("Resetting RN2903 module...");
-  digitalWrite(Pins::LORA_RST, HIGH); // Deactivate RESET
-  delay(Delays::SHORT);               // Hold RESET high for a short duration
-  digitalWrite(Pins::LORA_RST, LOW);  // Activate RESET
-  delay(Delays::LONG);                // Hold RESET low for 1 second
-  digitalWrite(Pins::LORA_RST, HIGH); // Deactivate RESET
+  digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
+  delay(Delays::SHORT);                                           // Hold RESET high for a short duration
+  digitalWrite(Pins::LORA_RST, LOW);                              // Activate RESET
+  delay(Delays::LONG);                                            // Hold RESET low for 1 second
+  digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
+  loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG); // Reset LoRa module
   Serial.println("RN2903 module reset.");
   delay(Delays::LONG); // Wait for module to initialize after reset
 }
@@ -658,9 +701,9 @@ void displayData(const String &jsonData, float activePowerKW, float totalActiveP
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.println("Total Active Power:");
-  display.setTextSize(2);
+  display.setTextSize(1.5);
   display.setCursor(0, 10);
-  display.printf("%.2f W\n", totalActivePower);
+  display.printf("%.2f kW\n", totalActivePower);
 
   display.display();
 }
