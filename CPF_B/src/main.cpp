@@ -233,7 +233,6 @@ public:
   void begin()
   {
     Serial.println("Initializing LoRa Serial Communication...");
-    loraSerial.begin(57600, SERIAL_8N1, Pins::LORA_RX, Pins::LORA_TX);
     delay(Delays::SHORT);
     Serial.println("LoRa Serial Communication initialized at 57600 bps.");
 
@@ -414,6 +413,7 @@ void setup()
 {
   // Initialize Serial Monitor
   Serial.begin(UserSerialConfig::BAUD_RATE);
+  loraSerial.begin(57600, SERIAL_8N1, Pins::LORA_RX, Pins::LORA_TX);
   // while (!Serial)
   // {
   //   ; // Wait for Serial Monitor to open
@@ -426,7 +426,7 @@ void setup()
   pinMode(Pins::POWER, OUTPUT);
   digitalWrite(Pins::POWER, HIGH); // Turn on RN2903
   Serial.println("Power to RN2903 enabled.");
-  delay(Delays::SHORT); // Allow power to stabilize
+  delay(Delays::LONG); // Allow power to stabilize
 
   // // Initialize Reset Pin for LoRa Module
   pinMode(Pins::LORA_RST, OUTPUT);
@@ -437,7 +437,7 @@ void setup()
   digitalWrite(Pins::LORA_RST, HIGH); // Ensure RESET is inactive
   // loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG);
   // Serial.println("RN2903 RESET pin set to HIGH (inactive).");
-  delay(Delays::SHORT);
+  delay(Delays::LONG);
 
   // Reset the LoRa Module
   // resetLoRaModule();
@@ -455,8 +455,8 @@ void setup()
   delay(Delays::LONG); // Wait for settings to take effect
 
   // Send initial command to get system version from LoRa
-  Serial.println("Requesting system version from RN2903...");
-  loraManager.sendCommand(LoRaCommands::SYS_GET_VER, Delays::LONG);
+  // Serial.println("Requesting system version from RN2903...");
+  // loraManager.sendCommand(LoRaCommands::SYS_GET_VER, Delays::LONG);
 }
 
 // ===========================
