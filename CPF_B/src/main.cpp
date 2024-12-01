@@ -22,6 +22,7 @@
  * @namespace Pins
  * @brief Defines the pin configurations for various modules.
  */
+
 namespace Pins
 {
   // LoRa Module Pins
@@ -86,12 +87,15 @@ namespace ModbusRegisters
   constexpr uint16_t TOTAL_APPARENT_POWER = 11; /**< 40012 - Total Apparent Power (LUINT32) */
   constexpr uint16_t POWER_FACTOR = 10;         /**< 40011 - Power Factor (INT16) */
   constexpr uint16_t TOTAL_ACTIVE_POWER = 23;   /**< 40024 - Total Active Power (0.01 W) */
+
+  // Serial Number
+  constexpr uint16_t SERIAL_NUMBER = 9000; /**< 49003 - Serial Number */
 }
 
 /**
  * @brief Configuration toggle to use mock data instead of actual Modbus data.
  */
-constexpr bool USE_MOCK_DATA = true; /**< Set to true to use mock data */
+constexpr bool USE_MOCK_DATA = false; /**< Set to true to use mock data */
 
 /**
  * @namespace Delays
@@ -136,6 +140,7 @@ namespace JSONKeys
   const char *IC = "Ic";                               /**< Current C */
   const char *ACTIVE_POWER = "ActivePower";            /**< Active Power */
   const char *TOTAL_ACTIVE_POWER = "TotalActivePower"; /**< Total Active Power */
+  const char *SERIAL_NUMBER = "SerialNumber";          /**< Serial Number */
 }
 
 // ===========================
@@ -386,6 +391,27 @@ public:
       return false;
     }
   }
+
+  bool readRegisters(uint16_t start, uint16_t count, uint32_t *buffer)
+  {
+    uint16_t result = modbus.readHoldingRegisters(start, count);
+    if (result == modbus.ku8MBSuccess)
+    {
+      for (uint16_t i = 0; i < count; i++)
+      {
+        buffer[i] = modbus.getResponseBuffer(i);
+      }
+      return true;
+    }
+    else
+    {
+      Serial.print("Modbus Read Error (Start: ");
+      Serial.print(start);
+      Serial.print("): ");
+      Serial.println(result, HEX);
+      return false;
+    }
+  }
 };
 
 // ===========================
@@ -578,6 +604,17 @@ void loop()
         Serial.printf("Total Active Power: %.2f W\n", totalActivePower);
       }
 
+      // Read Serial Number
+      uint16_t serialNumberBuffer[2]; // Use two uint16_t to hold each Modbus register
+      uint32_t serialNumber = 0;
+      success = modbusManager.readRegisters(ModbusRegisters::SERIAL_NUMBER, 2, serialNumberBuffer);
+      if (success)
+      {
+        Serial.printf("Serial Number Registers: %u, %u\n", serialNumberBuffer[1], serialNumberBuffer[0]);
+        serialNumber = ((uint32_t)serialNumberBuffer[1] << 16) | serialNumberBuffer[0];
+        Serial.printf("Serial Number: %u\n", serialNumber);
+      }
+
       // ===========================
       // Prepare JSON Data to Send via LoRa
       // ===========================
@@ -590,7 +627,8 @@ void loop()
       jsonData += "\"" + String(JSONKeys::IB) + "\":" + String(currents[1], 3) + ",";
       jsonData += "\"" + String(JSONKeys::IC) + "\":" + String(currents[2], 3) + ",";
       jsonData += "\"" + String(JSONKeys::ACTIVE_POWER) + "\":" + String(activePowerKW, 3) + ",";
-      jsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":" + String(totalActivePower * 0.001f, 2);
+      jsonData += "\"" + String(JSONKeys::TOTAL_ACTIVE_POWER) + "\":" + String(totalActivePower * 0.001f, 2) + ",";
+      jsonData += "\"" + String(JSONKeys::SERIAL_NUMBER) + "\":" + String(serialNumber);
       jsonData += "}";
 
       Serial.println("JSON Data to send via LoRa: " + jsonData);
