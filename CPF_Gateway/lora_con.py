@@ -4,6 +4,10 @@ import serial
 import time
 import logging
 from typing import Optional
+from oled_display import OLEDDisplay
+from datetime import datetime
+
+oled = OLEDDisplay()
 
 # ===========================
 # Configuration Section
@@ -42,13 +46,14 @@ class Config:
         "Ib": "Ib",
         "Ic": "Ic",
         "ActivePower": "ActivePower",
-        "TotalActivePower": "TotalActivePower"
+        "TotalActivePower": "TotalActivePower",
+        "SerialNumber":"SerialNumber"
     }
 
     # ----- API Integration -----
-    POST_URL = 'https://fac7-171-96-191-39.ngrok-free.app/Dashboard/api/update_data.php'  # Replace with your actual URL
+    POST_URL = 'https://taihen-suki-desu.loca.lt/api/update_data.php'  # Replace with your actual URL
     SENSOR_ID = 123
-    GATEWAY_ID = "GATEWAY001"
+    GATEWAY_ID = 123
 
     # ----- Logging and Debugging -----
     DEBUG_MODE = True              # Set to True to enable debug logs
@@ -284,6 +289,10 @@ class LoRaManager:
                 hex_data = parts[1]
                 readable_message = hex_to_string(hex_data)
                 logger.debug(f"Received Packet: {readable_message}")
+                # display timestamp on OLED
+                time = datetime.now().strftime("%H:%M:%S")
+                oled.display(time)
+                oled.display(f"Received Packet")
 
                 # Attempt to parse JSON
                 try:
@@ -294,13 +303,16 @@ class LoRaManager:
 
                     # Prepare data for POST request
                     post_data = {
-                        "sensor_id": self.config.SENSOR_ID,
+                        "sensor_id": data.get("SerialNumber"),
                         "gateway_id": self.config.GATEWAY_ID,
                         "data_kwh" : data.get("TotalActivePower", 0.0)
                     }
 
                     # Send POST request with the data
                     self.send_post_request(post_data)
+                    time = datetime.now().strftime("%H:%M:%S")
+                    oled.display(time)
+                    oled.display(f"Post to server")
 
                 except json.JSONDecodeError:
                     logger.error(f"Failed to decode JSON from message: {readable_message}")
