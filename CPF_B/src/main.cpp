@@ -414,10 +414,10 @@ void setup()
 {
   // Initialize Serial Monitor
   Serial.begin(UserSerialConfig::BAUD_RATE);
-  while (!Serial)
-  {
-    ; // Wait for Serial Monitor to open
-  }
+  // while (!Serial)
+  // {
+  //   ; // Wait for Serial Monitor to open
+  // }
   Serial.println("==================================");
   Serial.println("ESP32, RN2903 LoRa, and Modbus Setup");
   Serial.println("==================================");
@@ -428,19 +428,19 @@ void setup()
   Serial.println("Power to RN2903 enabled.");
   delay(Delays::SHORT); // Allow power to stabilize
 
-  // Initialize Reset Pin for LoRa Module
+  // // Initialize Reset Pin for LoRa Module
   pinMode(Pins::LORA_RST, OUTPUT);
   digitalWrite(Pins::LORA_RST, HIGH);
   delay(Delays::LONG);
   digitalWrite(Pins::LORA_RST, LOW); //
   delay(Delays::LONG);
   digitalWrite(Pins::LORA_RST, HIGH); // Ensure RESET is inactive
-  loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG);
-  Serial.println("RN2903 RESET pin set to HIGH (inactive).");
+  // loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG);
+  // Serial.println("RN2903 RESET pin set to HIGH (inactive).");
   delay(Delays::SHORT);
 
   // Reset the LoRa Module
-  resetLoRaModule();
+  // resetLoRaModule();
 
   // Initialize OLED Display
   initializeOLED();
@@ -649,12 +649,12 @@ void loop()
  */
 void resetLoRaModule()
 {
-  Serial.println("Resetting RN2903 module...");
-  digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
-  delay(Delays::SHORT);                                           // Hold RESET high for a short duration
-  digitalWrite(Pins::LORA_RST, LOW);                              // Activate RESET
-  delay(Delays::LONG);                                            // Hold RESET low for 1 second
-  digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
+  // Serial.println("Resetting RN2903 module...");
+  // digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
+  // delay(Delays::SHORT);                                           // Hold RESET high for a short duration
+  // digitalWrite(Pins::LORA_RST, LOW);                              // Activate RESET
+  // delay(Delays::LONG);                                            // Hold RESET low for 1 second
+  // digitalWrite(Pins::LORA_RST, HIGH);                             // Deactivate RESET
   loraManager.sendCommand(LoRaCommands::SYS_RESET, Delays::LONG); // Reset LoRa module
   Serial.println("RN2903 module reset.");
   delay(Delays::LONG); // Wait for module to initialize after reset
